@@ -26,18 +26,22 @@ class APIError(Exception):
 class BaseAPI(object):
     '''An base class to implement the methods of a RESTful HTTP API'''
 
-    rate_limit_response = 403
-
-    def __init__(self, cache_life, auth_dict={}):
+    def __init__(self, api, rate_limit_status_code=403,
+                 cache_life=float('inf'), auth_dict={}):
         '''
         Params:
+            string api: base link to api (https://spotify.com/v1/)
+            int rate_limit_status_code: status code to pass to RateLimitError
+                constructor
             int cache_life: length in seconds a request should be read from
                 in-memory cache before requesting from the server again
             dict auth_dict: dictionary of authorization information,
                 eg {'token': val, 'secret': val}
         '''
+        self._api = api
+        self._rate_limit_status_code = rate_limit_status_code
         self._auth_dict = auth_dict
-        self.cache_life = cache_life
+        self._cache_life = cache_life
 
     @staticmethod
     def _memoize(f):
@@ -53,7 +57,7 @@ class BaseAPI(object):
             # instance) and kwargs
             key = tuple([f, frozenset(kwargs)] + list(args[1:]))
             # store new key / update if our key has outlived cache-life
-            if key not in memo or now - memo[key][1] > instance.cache_life:
+            if key not in memo or now - memo[key][1] > instance._cache_life:
                 memo[key] = (f(*args, **kwargs), now)
             # return our cached request
             return memo[key][0]
@@ -79,8 +83,8 @@ class BaseAPI(object):
         if sc // 100 == 2:
             assert response.text, 'Invalid response from server'
             return
-        elif sc == self.rate_limit_response:
-            raise RateLimitError(self.rate_limit_response)
+        elif sc == self._rate_limit_status_code:
+            raise RateLimitError(self._rate_limit_status_code)
         elif sc == 401:
             response = json.loads(response.text)
             raise APIError(response['error_msg'])
@@ -97,7 +101,7 @@ class BaseAPI(object):
             string qstring: string for API query without auth key
         '''
         qstring += self._key
-        response = requests.get(self._api + qstring, headers=self.headers)
+        response = requests.get(self._api + qstring)
         self._check_status(response)
         return json.loads(response.text)
 
