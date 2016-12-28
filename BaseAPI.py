@@ -8,7 +8,7 @@ class RateLimitError(Exception):
 
     def __init__(self, value):
         '''
-        Params:
+        Args:
             value: Rate Limit error code for the API'''
         self.value = str(value) + ' Error/Rate Limit Encountered'
 
@@ -18,7 +18,7 @@ class APIError(Exception):
 
     def __init__(self, value):
         '''
-        Params:
+        Args:
             value: error message to display'''
         self.value = value
 
@@ -29,7 +29,7 @@ class BaseAPI(object):
     def __init__(self, api, rate_limit_status_code=403,
                  cache_life=float('inf'), auth_dict={}):
         '''
-        Params:
+        Args:
             string api: base link to api (https://spotify.com/v1/)
             int rate_limit_status_code: status code to pass to RateLimitError
                 constructor
@@ -75,7 +75,7 @@ class BaseAPI(object):
     def _check_status(self, response):
         '''Checks response status and raises errors accordingly
 
-        Params:
+        Args:
             requests.Response response: the response of a request
         '''
         sc = response.status_code
@@ -109,7 +109,7 @@ class BaseAPI(object):
         '''Calls the passed put/post/delete method with the specified payload
         and returns the response as JSON if it is valid
 
-        Params:
+        Args:
             string endpoint: URL of API endpoint
             dict payload: dict of payload data
             requests.method http_method: requests' put/post/delete method
@@ -144,7 +144,7 @@ class BaseAPI(object):
     def _parse_params(self, locals_copy, endpoint_args):
         '''Format all params for a GET request into a query string
 
-        Params:
+        Args:
             dict locals_copy: a copy() of the locals() value in an API method
             list endpoint_args: a list of names of variables that refer to
                 endpoint-specific arguments in the method's local variables,
@@ -162,9 +162,9 @@ class BaseAPI(object):
         return query_string
 
     def _parse_payload(self, locals_copy, endpoint_args):
-        '''Remove self and endpoint args from POST/PUT/DELETE payload
+        '''Remove self and endpoint args from PUT/POST/DELETE payload
 
-        Params:
+        Args:
             dict locals_copy: a copy() of the locals() value in an API method
             list endpoint_args: a list of names of variables that refer to
                 endpoint-specific arguments in the method's local variables,
@@ -177,7 +177,7 @@ class BaseAPI(object):
 
     def set_auth(self, auth):
         '''Change to user-supplied auth token
-        Params:
+        Args:
             dict auth: dictionary of new authentication information
         '''
         self._auth_dict = auth
