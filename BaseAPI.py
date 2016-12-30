@@ -55,7 +55,8 @@ class BaseAPI(object):
             instance = args[0]
             # create a hashable key out of the function, args (excluding
             # instance) and kwargs
-            key = tuple([f, frozenset(kwargs)] + list(args[1:]))
+            key = tuple([f, frozenset(sorted(kwargs.items()))] +
+                        list(args[1:]))
             # store new key / update if our key has outlived cache-life
             if key not in memo or now - memo[key][1] > instance._cache_life:
                 memo[key] = (f(*args, **kwargs), now)
