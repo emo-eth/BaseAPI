@@ -23,11 +23,24 @@ class APIError(Exception):
         self.value = value
 
 
+def _hashkey(obj):
+    '''Converts a list, dict, or set to a hashable pseudo-equivalent'''
+    # TODO: timeit to check sorted tuple vs frozenset speed (& memory?)
+    if isinstance(obj, list):
+        return tuple(sorted(obj))
+    if isinstance(obj, dict):
+        return tuple(sorted(obj.items()))
+    if isinstance(obj, set):
+        return tuple(sorted(obj))
+    return obj
+
+
 class BaseAPI(object):
-    '''An base class to implement the methods of a RESTful HTTP API'''
+    '''A base class to implement the methods of a RESTful HTTP API'''
+    # TODO: Handle OAuth2 Flow
 
     def __init__(self, api, rate_limit_status_code=403,
-                 cache_life=float('inf'), auth_dict={}):
+                 cache_life=float('inf'), payload_auth={}, headers={}):
         '''
         Args:
             string api: base link to api (https://spotify.com/v1/)
@@ -35,41 +48,52 @@ class BaseAPI(object):
                 constructor
             int cache_life: length in seconds a request should be read from
                 in-memory cache before requesting from the server again
-            dict auth_dict: dictionary of authorization information,
+            dict payload_auth: dictionary of authorization information, passed
+                in as part of payload or query params
                 eg {'token': val, 'secret': val}
+            dict headers: headers (including auth) to be passed with each
+                request
         '''
         self._api = api
         self._rate_limit_status_code = rate_limit_status_code
-        self._auth_dict = auth_dict
+        self._payload_auth = payload_auth
+        self._headers = headers
         self._cache_life = cache_life
+        self._session = requests.Session()
 
     @staticmethod
     def _memoize(f):
-        '''Wraps a function to read from a memo dictionary. The args of a
-        function must be hashable'''
-
-        memo = {}
+        '''Wraps a function to read from a static memo dictionary. The subclass
+        must include its own instance or static memo dictionary The args of
+        a function must be hashable'''
 
         def memoized(*args, **kwargs):
             now = int(time.time())
             instance = args[0]
+            assert hasattr(instance, 'memo'), ("Subclass or instance needs " +
+                                               "a 'memo' dict attribute to " +
+                                               "be memoized.")
+            hashable_args = [_hashkey(x) for x in args[1:]]
+            hashable_kwargs = [_hashkey({k: _hashkey(v) for k, v in
+                                         kwargs.items()})]
             # create a hashable key out of the function, args (excluding
             # instance) and kwargs
-            key = tuple([f, frozenset(sorted(kwargs.items()))] +
-                        list(args[1:]))
-            # store new key / update if our key has outlived cache-life
-            if key not in memo or now - memo[key][1] > instance._cache_life:
-                memo[key] = (f(*args, **kwargs), now)
+            key = tuple([f] + hashable_args + hashable_kwargs)
+            # store new key or update if our key has outlived cache-life
+            if (key not in instance.memo) or (now - instance.memo[key][1] >
+                                              instance._cache_life):
+                instance.memo[key] = (f(*args, **kwargs), now)
             # return our cached request
-            return memo[key][0]
+            return instance.memo[key][0]
 
+        memoized.debug = f
         return memoized
 
     @property
     def _key(self):
         '''Converts auth dict into query string format'''
         auth_string = ''
-        for k, v in self._auth_dict.items():
+        for k, v in self._payload_auth.items():
             auth_string += str(k) + '=' + str(v) + '&'
         return auth_string
 
@@ -88,7 +112,7 @@ class BaseAPI(object):
             raise RateLimitError(self._rate_limit_status_code)
         elif sc == 401:
             response = json.loads(response.text)
-            raise APIError(response['error_msg'])
+            raise APIError(response)
         else:
             raise ValueError('Status code unhandled: ' +
                              str(sc) + ' for URL ' + response.url)
@@ -102,7 +126,8 @@ class BaseAPI(object):
             string qstring: string for API query without auth key
         '''
         qstring += self._key
-        response = requests.get(self._api + qstring)
+        response = self._session.get(self._api + qstring,
+                                     headers=self._headers)
         self._check_status(response)
         return json.loads(response.text)
 
@@ -115,19 +140,20 @@ class BaseAPI(object):
             dict payload: dict of payload data
             requests.method http_method: requests' put/post/delete method
         '''
-        payload.update(self._auth_dict)
-        response = http_method(self._api + endpoint, data=payload)
+        payload.update(self._payload_auth)
+        response = http_method(self._api + endpoint, data=payload,
+                               headers=self._headers)
         self._check_status(response)
         return json.loads(response.text)
 
     def _put(self, endpoint, payload):
-        return self._put_post_delete(endpoint, payload, requests.put)
+        return self._put_post_delete(endpoint, payload, self._session.put)
 
     def _post(self, endpoint, payload):
-        return self._put_post_delete(endpoint, payload, requests.post)
+        return self._put_post_delete(endpoint, payload, self._session.post)
 
     def _delete(self, endpoint, payload):
-        return self._put_post_delete(endpoint, payload, requests.delete)
+        return self._put_post_delete(endpoint, payload, self._session.delete)
 
     def _param(self, param, value):
         '''Formats a parameter/value pair for html
@@ -142,12 +168,12 @@ class BaseAPI(object):
         else:
             return ''
 
-    def _parse_params(self, locals_copy, endpoint_args):
+    def _parse_params(self, locals_copy, exclude_endpoints=[]):
         '''Format all params for a GET request into a query string
 
         Args:
             dict locals_copy: a copy() of the locals() value in an API method
-            list endpoint_args: a list of names of variables that refer to
+            list exclude_endpoints: a list of names of variables that refer to
                 endpoint-specific arguments in the method's local variables,
                 ie arguments that do not need to be parsed into a query string
                     eg: http://spotify.com/v1/{artists}/xxx
@@ -156,29 +182,22 @@ class BaseAPI(object):
         query_string = ''
         # remove self and endpoint-specific args
         locals_copy.pop('self')
-        for val in endpoint_args:
+        for val in exclude_endpoints:
             locals_copy.pop(val)
         for param, val in locals_copy.items():
             query_string += self._param(param, val)
         return query_string
 
-    def _parse_payload(self, locals_copy, endpoint_args):
+    def _parse_payload(self, locals_copy, exclude_endpoints=[]):
         '''Remove self and endpoint args from PUT/POST/DELETE payload
 
         Args:
             dict locals_copy: a copy() of the locals() value in an API method
-            list endpoint_args: a list of names of variables that refer to
+            list exclude_endpoints: a list of names of variables that refer to
                 endpoint-specific arguments in the method's local variables,
                 ie arguments that do not need to be parsed in the payload
                     eg: http://spotify.com/v1/{artists}/xxx'''
         locals_copy.pop('self')
-        for val in endpoint_args:
+        for val in exclude_endpoints:
             locals_copy.pop(val)
         return locals_copy
-
-    def set_auth(self, auth):
-        '''Change to user-supplied auth token
-        Args:
-            dict auth: dictionary of new authentication information
-        '''
-        self._auth_dict = auth
