@@ -1,6 +1,8 @@
 import requests
 import json
 import time
+import multiprocessing
+from functools import wraps
 
 
 class RateLimitError(Exception):
@@ -39,6 +41,8 @@ class BaseAPI(object):
     '''A base class to implement the methods of a RESTful HTTP API'''
     # TODO: Handle OAuth2 Flow
 
+    lock = multiprocessing.Lock()
+
     def __init__(self, api, rate_limit_status_code=403,
                  cache_life=float('inf'), payload_auth={}, headers={}):
         '''
@@ -67,6 +71,7 @@ class BaseAPI(object):
         must include its own instance or static memo dictionary The args of
         a function must be hashable'''
 
+        @wraps(f)
         def memoized(*args, **kwargs):
             now = int(time.time())
             instance = args[0]
@@ -88,6 +93,45 @@ class BaseAPI(object):
 
         memoized.debug = f
         return memoized
+
+    @staticmethod
+    def _throttle(max_per_second, global_rate_limit=False):
+        '''Rate-limits a method call either globally or on a per-method basis
+
+        Args:
+            float max_per_second: max number of times this method may be called
+                per second
+            boolean global_rate_limit: if true, all other methods with this
+                flag will be subject to this rate-limit. if false,
+                rate-limits will be applied on a per-method basis.
+                eg: set to true if the *entire API* allows, eg 20 calls per
+                second
+        '''
+        interval = 1.0 / max_per_second
+
+        def decorator(f):
+            last_time = [0.0]
+
+            @wraps(f)
+            def throttled(*args, **kwargs):
+                instance = args[0]
+                if global_rate_limit:
+                    last_time_called = instance.last_time_called
+                else:
+                    last_time_called = last_time
+                instance.lock.acquire()
+                elapsed = time.clock() - last_time_called[0]
+                time_to_wait = interval - elapsed
+                if time_to_wait > 0 and last_time_called[0]:
+                    time.sleep(time_to_wait)
+                return_val = f(*args, **kwargs)
+                last_time_called[0] = time.clock()
+                instance.lock.release()
+                return return_val
+
+            return throttled
+
+        return decorator
 
     @property
     def _key(self):

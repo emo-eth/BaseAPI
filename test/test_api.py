@@ -1,4 +1,5 @@
 import unittest
+from multiprocessing.pool import ThreadPool
 from BaseAPI import BaseAPI
 from timeit import timeit
 from time import sleep
@@ -159,6 +160,21 @@ class LIFXLite(BaseAPI):
         return self._put(endpoint, payload)
 
 
+class ThrottleTest(BaseAPI):
+    last_time_called = [0.0]
+
+    def __init__(self):
+        super(ThrottleTest, self).__init__('test')
+
+    @BaseAPI._throttle(.5)
+    def test_throttle(self):
+        return 5
+
+    @BaseAPI._throttle(.5)
+    def test_throttle2(self):
+        return 6
+
+
 class TestBaseAPI(unittest.TestCase):
 
     def test_assert_memo(self):
@@ -275,6 +291,57 @@ class TestBaseAPI(unittest.TestCase):
         self.assertTrue((test2.fib.debug, (10,), tuple()) in Fib.memo)
         # and test that the memoizing works, I suppose
         self.assertEqual(val1, val2)
+
+    def test_throttle(self):
+        "Throttling works"
+        throttled = ThrottleTest()
+        wait1 = timeit(throttled.test_throttle, number=3)
+        self.assertTrue(wait1 > 1)
+
+    def test_throttle_multiple_instances(self):
+        "Throttling works across instances with a static timer"
+        throttle1 = ThrottleTest()
+        throttle2 = ThrottleTest()
+        throttle1.test_throttle()
+        throttle1.test_throttle()
+        wait = timeit(throttle2.test_throttle, number=1)
+        self.assertTrue(wait > 1)
+
+    def test_throttle_multiple_threads(self):
+        "Throttling works across threads"
+        throttle = ThrottleTest()
+
+        def test():
+            with ThreadPool(4) as pool:
+                objs = (pool.apply_async(throttle.test_throttle)
+                        for x in range(4))
+                return [obj.get() for obj in objs]
+
+        wait = timeit(test, number=1)
+        self.assertTrue(wait > 5)
+
+    def test_throttle_multiple_instances_threads(self):
+        "Throttling works across threads across instances"
+        throttle1 = ThrottleTest()
+        throttle2 = ThrottleTest()
+
+        def test():
+            with ThreadPool(4) as pool:
+                obj1 = pool.apply_async(throttle1.test_throttle)
+                obj2 = pool.apply_async(throttle2.test_throttle)
+                obj3 = pool.apply_async(throttle1.test_throttle)
+                obj4 = pool.apply_async(throttle2.test_throttle)
+                return [obj.get() for obj in [obj1, obj2, obj3, obj4]]
+
+        wait = timeit(test, number=1)
+        self.assertTrue(wait > 5)
+
+    def test_throttle_non_global(self):
+        "Throttling is not global across methods by default"
+        throttle = ThrottleTest()
+        throttle.test_throttle()
+        wait = timeit(throttle.test_throttle2, number=1)
+        self.assertTrue(wait < 1)
 
     def test_oauth_flow(self):
         raise NotImplementedError()
