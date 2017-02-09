@@ -102,9 +102,9 @@ class BaseAPI(object):
             float max_per_second: max number of times this method may be called
                 per second
             boolean global_rate_limit: if true, all other methods with this
-                flag will be subject to this rate-limit. if false,
+                flag will reference the same last_time_called. if false,
                 rate-limits will be applied on a per-method basis.
-                eg: set to true if the *entire API* allows, eg 20 calls per
+                eg: set to true if the *entire API* allows 20 calls per
                 second
         '''
         interval = 1.0 / max_per_second
@@ -225,9 +225,9 @@ class BaseAPI(object):
         Returns a formatted query string of param=value& pairs'''
         query_string = ''
         # remove self and endpoint-specific args
-        locals_copy.pop('self')
+        del locals_copy['self']
         for val in exclude_endpoints:
-            locals_copy.pop(val)
+            del locals_copy[val]
         for param, val in locals_copy.items():
             query_string += self._param(param, val)
         return query_string
@@ -241,7 +241,7 @@ class BaseAPI(object):
                 endpoint-specific arguments in the method's local variables,
                 ie arguments that do not need to be parsed in the payload
                     eg: http://spotify.com/v1/{artists}/xxx'''
-        locals_copy.pop('self')
+        del locals_copy['self']
         for val in exclude_endpoints:
-            locals_copy.pop(val)
+            del locals_copy[val]
         return locals_copy
