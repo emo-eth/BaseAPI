@@ -80,7 +80,7 @@ class BaseAPI(object):
                                                "be memoized.")
             hashable_args = [_hashkey(x) for x in args[1:]]
             hashable_kwargs = [_hashkey({k: _hashkey(v) for k, v in
-                                         list(kwargs.items())})]
+                                         kwargs.items()})]
             # create a hashable key out of the function, args (excluding
             # instance) and kwargs
             key = tuple([f] + hashable_args + hashable_kwargs)
@@ -137,7 +137,7 @@ class BaseAPI(object):
     def _key(self):
         '''Converts auth dict into query string format'''
         auth_string = ''
-        for k, v in list(self._payload_auth.items()):
+        for k, v in self._payload_auth.items():
             auth_string += str(k) + '=' + str(v) + '&'
         return auth_string
 
@@ -228,7 +228,7 @@ class BaseAPI(object):
         del locals_copy['self']
         for val in exclude_endpoints:
             del locals_copy[val]
-        for param, val in list(locals_copy.items()):
+        for param, val in locals_copy.items():
             query_string += self._param(param, val)
         return query_string
 
